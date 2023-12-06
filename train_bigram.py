@@ -45,7 +45,7 @@ wandb.init(
 
 def main():
     # load data
-    fname = "/home/haydark/dev/uzbekgpt/data/tinyshakespeare/input.txt"
+    fname = "/home/haydark/dev/uzbekgpt/data/raw/input.txt"
     with open(fname, 'r', encoding='utf-8') as f:
         text = f.read()
 
@@ -67,13 +67,23 @@ def main():
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     # initialize model
-    model = BigramLanguageModel(vocab_size, block_size).to(device)
+    model = BigramLanguageModel(vocab_size).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     # train model
-    trainer = Trainer(model, optimizer, train_loader, val_loader, max_iters, eval_iters, eval_interval, checkpoint_path)
-    train_losses, val_losses = trainer.train()
-
+    trainer = Trainer(
+        model,
+        optimizer,
+        train_loader,
+        val_loader,
+        max_iters,
+        eval_iters,
+        eval_interval,
+        checkpoint_path,
+        device,
+    )
+    trainer.run()
+    wandb.finish()
 
 
 
