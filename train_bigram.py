@@ -1,25 +1,27 @@
 import os
 import wandb
 import torch
+import numpy as np
 from tqdm import tqdm
 from src.data_processing.tokenizers import SimpleCharTokenizer
 from src.data_processing.datasets import TinyShakespeareDataset
 from src.train.trainer import Trainer
 from src.model.networks import BigramLanguageModel
+from src.data_processing.samplers import InfiniteSampler
 
-
-torch.manual_seed(42)
 
 # hyperparameters
 model_name = "bigram"
 train_frac = 0.9 # what fraction of the data will be used for training?
 batch_size = 32 # how many independent sequences will we process in parallel?
 block_size = 8 # what is the maximum context length for predictions?
-max_iters = 3000
-eval_interval = 300
+max_iters = 30000
+eval_interval = 500
 learning_rate = 1e-2
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-eval_iters = 200
+eval_iters = 300
+n_workers = 0
+random_seed = 42
 checkpoint_path = f"/home/haydark/dev/uzbekgpt/results/checkpoints/{model_name}"
 
 if not os.path.exists(checkpoint_path):
@@ -38,10 +40,16 @@ wandb.init(
         "max_iters": max_iters,
         "eval_interval": eval_interval,
         "eval_iters": eval_iters,
+        "n_workers": n_workers,
+        "seed": random_seed,
     }
 
 )
 # -------------------------------------------------------------
+# set random seed
+np.random.seed(random_seed)
+torch.manual_seed(random_seed)
+
 
 def main():
     # load data
@@ -63,8 +71,20 @@ def main():
     # initialize datasets
     train_dataset = TinyShakespeareDataset(train_text, block_size, tokenizer)
     val_dataset = TinyShakespeareDataset(val_text, block_size, tokenizer)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_sampler = InfiniteSampler(train_dataset, rank=0, num_replicas=1, shuffle=True, seed=random_seed)
+    val_sampler = InfiniteSampler(val_dataset, rank=0, num_replicas=1, shuffle=True, seed=random_seed)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        sampler=train_sampler,
+        num_workers=n_workers,
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        sampler=val_sampler,
+        num_workers=n_workers,
+    )
 
     # initialize model
     model = BigramLanguageModel(vocab_size).to(device)
@@ -82,11 +102,10 @@ def main():
         checkpoint_path,
         device,
     )
-    trainer.run()
+    trainer.train()
     wandb.finish()
 
 
 
 if __name__ == '__main__':
     main()
-    

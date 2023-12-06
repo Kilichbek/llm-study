@@ -25,37 +25,15 @@ class Trainer:
         self.eval_iters = eval_iters
         self.checkpoint_path = checkpoint_path
         self.device = device
-
-    def train(self, epoch):
-        """
-        Training loop for a language model.
-        """
-        self.model.train()
-        running_loss = 0.0
-        with tqdm(desc=f"Iter {epoch} - train", unit="iters", total=len(self.train_loader)) as pbar:
-            for i, (x, y) in enumerate(self.train_loader):
-                x, y = x.to(self.device), y.to(self.device)
-                self.optimizer.zero_grad()
-                logits = self.model(x)
-                loss = self.model.loss(logits, y)
-                loss.backward()
-                self.optimizer.step()
-                running_loss += loss.item()
-
-                pbar.set_postfix(loss=running_loss / (i + 1))
-                pbar.update()
-
-        loss = running_loss / len(self.train_loader)
-        return loss
+        self.train_set_iter = iter(self.train_loader)
+        self.val_set_iter = iter(self.val_loader)
     
-    def evaluate(self, epoch):
-        """
-        Evaluation loop for a language model.
-        """
+    def compute_loss(self, data_iter, epoch, split='train'):
         self.model.eval()
         running_loss = 0.0
-        with tqdm(desc=f"Iter {epoch} - validation", unit="iters", total=len(self.val_loader)) as pbar:
-            for i, (x, y) in enumerate(self.val_loader):
+        with tqdm(desc=f"Step {epoch} - {split}", unit="iters", total=self.eval_iters) as pbar:
+            for i in range(self.eval_iters):
+                x, y = next(data_iter)
                 x, y = x.to(self.device), y.to(self.device)
                 logits = self.model(x)
                 loss = self.model.loss(logits, y)
@@ -63,28 +41,34 @@ class Trainer:
 
                 pbar.set_postfix(loss=running_loss / (i + 1))
                 pbar.update()
-
-        loss = running_loss / len(self.val_loader)
+        loss = running_loss / self.eval_iters
         return loss
 
-    def run(self):
+    def train(self):
         """
         Training loop for a language model.
         """
         best_val_loss = float("inf")
         for epoch in range(self.max_iters):
-            train_loss = self.train(epoch)
-            
-            if epoch % self.eval_interval == 0:
-                val_loss = self.evaluate(epoch)
-                wandb.log({'val_loss': val_loss})
-                print(f"Epoch {epoch} - train loss: {train_loss:.4f} - val loss: {val_loss:.4f}")
+            self.model.train()
+            running_loss = 0.0
+            x, y = next(self.train_set_iter)
+            x, y = x.to(self.device), y.to(self.device)
+            self.optimizer.zero_grad()
+            logits = self.model(x)
+            loss = self.model.loss(logits, y)
+            loss.backward()
+            self.optimizer.step()
 
+            if epoch % self.eval_interval == 0:
+                train_loss = self.compute_loss(self.train_set_iter, epoch, split='train')
+                val_loss = self.compute_loss(self.val_set_iter, epoch, split='val')
+                print(f"Step {epoch} - train loss: {train_loss:.4f} - val loss: {val_loss:.4f}")
+                wandb.log({"train_loss": train_loss, "val_loss": val_loss})
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
-                    checkpoint_name = f"model-{epoch}.pt"
-                    checkpoint_path = os.path.join(self.checkpoint_path, checkpoint_name)
-                    torch.save(self.model.state_dict(), checkpoint_path)
-            wandb.log({'train_loss': train_loss})
-
-          
+                    if self.checkpoint_path is not None:
+                        model_name = f"model-{epoch}.pt"
+                        model_save_path = os.path.join(self.checkpoint_path, model_name)
+                        torch.save(self.model.state_dict(), model_save_path)
+                        print(f"Step {epoch} - saved checkpoint to {model_save_path}")
